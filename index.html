@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Alerta Comunitário</title>
+<style>
+    /* O CSS Moderno que você gostou */
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    body { font-family: 'Inter', sans-serif; background: #121212; color: #fff; margin: 0; display: flex; justify-content: center; height: 100vh; overflow: hidden; }
+    .app { width: 100%; max-width: 450px; height: 100%; display: flex; flex-direction: column; background: #1e1e1e; box-shadow: 0 0 20px rgba(0,0,0,0.5); }
+    header { padding: 20px 15px; text-align: center; font-size: 22px; font-weight: 700; background: linear-gradient(135deg, #2c3e50, #000); border-bottom: 1px solid #333; }
+    #chat { flex: 1; padding: 20px 15px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; scroll-behavior: smooth; }
+    .msg { padding: 12px 16px; border-radius: 18px; max-width: 85%; font-size: 15px; line-height: 1.4; animation: slideIn 0.3s ease-out; word-wrap: break-word; }
+    @keyframes slideIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    .minha-msg { align-self: flex-end; background: #005c4b; border-bottom-right-radius: 4px; }
+    .outra-msg { align-self: flex-start; background: #202c33; border-bottom-left-radius: 4px; }
+    .btns { display: flex; flex-direction: column; gap: 12px; padding: 15px; background: #1e1e1e; }
+    button { height: 65px; border: none; border-radius: 16px; font-size: 18px; font-weight: 600; color: white; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 10px; transition: transform 0.1s; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
+    button:active { transform: scale(0.97); filter: brightness(1.2); }
+    .b1 { background: linear-gradient(135deg, #e53935, #b71c1c); } 
+    .b2 { background: linear-gradient(135deg, #fb8c00, #e65100); } 
+    .b3 { background: linear-gradient(135deg, #1e88e5, #1565c0); }
+    .inp { display: flex; padding: 15px; background: #2c2c2c; gap: 10px; border-top: 1px solid #444; }
+    input { flex: 1; padding: 14px 18px; border-radius: 24px; border: none; font-size: 15px; background: #3a3a3a; color: white; outline: none; }
+    input::placeholder { color: #888; }
+    .env { background: #00a884; padding: 0 22px; font-size: 15px; border: none; color: white; font-weight: 600; border-radius: 24px; }
+</style>
+</head>
+<body>
+<div class="app">
+    <header>🚨 Alerta Comunitário</header>
+    <div id="chat"><p style="text-align:center; color:#666; margin-top:20px;">Conectando ao servidor...</p></div>
+    <div class="btns">
+        <button onclick="acionar('Alerta de COBRA!', 'Cobra detectada')" class="b1">🐍 COBRA</button>
+        <button onclick="acionar('Alerta de PERIGO!', 'Perigo detectado')" class="b2">⚠️ PERIGO</button>
+        <button onclick="acionar('Alerta de CRIANÇA!', 'Criança em perigo')" class="b3">👦 CRIANÇA</button>
+    </div>
+    <div class="inp">
+        <input type="text" id="txt" placeholder="Digite uma mensagem...">
+        <button onclick="enviarTexto()" class="env">Enviar</button>
+    </div>
+</div>
+
+<script type="module">
+    // Importando as funções do Firebase
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+    import { getDatabase, ref, push, onChildAdded } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
+
+    // SUAS CONFIGURAÇÕES DO FIREBASE (Pegas da sua tela)
+    const firebaseConfig = {
+        databaseURL: "https://nv7-cobra-default-rtdb.firebaseio.com/"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+    const mensagensRef = ref(db, 'chat');
+    
+    const chat = document.getElementById('chat');
+    const input = document.getElementById('txt');
+
+    function falar(texto) {
+        if ('speechSynthesis' in window) {
+            window.speechSynthesis.cancel();
+            const fala = new SpeechSynthesisUtterance(texto);
+            fala.lang = 'pt-BR';
+            window.speechSynthesis.speak(fala);
+        }
+    }
+
+    function criarBolha(texto, classe, tocarSom) {
+        if (chat.querySelector('p')) chat.innerHTML = '';
+        const div = document.createElement('div');
+        div.className = 'msg ' + classe;
+        div.innerText = texto;
+        chat.appendChild(div);
+        chat.scrollTop = chat.scrollHeight;
+        if (tocarSom) falar(texto);
+    }
+
+    // Fica escutando novas mensagens (do outro aparelho)
+    onChildAdded(mensagensRef, (snapshot) => {
+        criarBolha(snapshot.val().texto, 'outra-msg', true);
+    });
+
+    function publicar(texto) {
+        // Mostra na tela local
+        criarBolha(texto, 'minha-msg', false);
+        // Envia para o banco de dados
+        push(mensagensRef, { texto: texto });
+    }
+
+    // Funções dos botões
+    window.acionar = function(texto, voz) {
+        publicar(texto);
+        falar(voz);
+        if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+    }
+
+    window.enviarTexto = function() {
+        if (input.value.trim() !== '') {
+            publicar(input.value);
+            input.value = '';
+        }
+    }
+
+    input.addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') window.enviarTexto();
+    });
+</script>
+</body>
+</html>
