@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>Alerta Comunitário</title>
+<style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { height: 100%; margin: 0; padding: 0; }
+    body { font-family: 'Inter', sans-serif; background: #121212; color: #fff; display: flex; justify-content: center; height: 100dvh; overflow: hidden; }
+    .app { width: 100%; max-width: 450px; height: 100%; display: flex; flex-direction: column; background: #1e1e1e; box-shadow: 0 0 20px rgba(0,0,0,0.5); }
+    header { padding: 15px; text-align: center; font-size: 20px; font-weight: 700; background: linear-gradient(135deg, #b71c1c, #000); border-bottom: 1px solid #333; flex-shrink: 0; }
+    #chat { flex: 1; padding: 15px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; scroll-behavior: smooth; }
+    .msg { padding: 12px 16px; border-radius: 16px; max-width: 90%; font-size: 15px; line-height: 1.4; word-wrap: break-word; position: relative; }
+    .minha-msg { align-self: flex-end; background: #005c4b; border-bottom-right-radius: 4px; }
+    .outra-msg { align-self: flex-start; background: #202c33; border-bottom-left-radius: 4px; border-left: 4px solid #e53935; }
+    .msg-tempo { font-size: 10px; color: #aaa; margin-top: 5px; display: block; text-align: right; }
+    .area-botao { display: flex; flex-direction: column; padding: 15px; align-items: center; justify-content: center; background: #1e1e1e; flex-shrink: 0; }
+    .btn-voz { width: 100px; height: 100px; border-radius: 50%; background: linear-gradient(135deg, #e53935, #b71c1c); border: none; color: white; font-size: 40px; cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 8px 20px rgba(229,57,53,0.5); transition: transform 0.1s; }
+    .btn-voz:active { transform: scale(0.95); }
+    .btn-voz.gravando { animation: pulsar 1s infinite; background: #ff0000; }
+    @keyframes pulsar { 0% { box-shadow: 0 0 0 0 rgba(255,0,0,0.7); } 70% { box-shadow: 0 0 0 20px rgba(255,0,0,0); } 100% { box-shadow: 0 0 0 0 rgba(255,0,0,0); } }
+    .texto-ajuda { margin-top: 10px; font-size: 14px; color: #888; text-align: center; }
+    .inp { display: flex; padding: 10px; background: #2c2c2c; gap: 8px; border-top: 1px solid #444; flex-shrink: 0; }
+    input { flex: 1; padding: 10px; border-radius: 20px; border: none; font-size: 13px; background: #3a3a3a; color: white; outline: none; }
+    .env { background: #00a884; padding: 0 15px; font-size: 13px; border: none; color: white; font-weight: 600; border-radius: 20px; }
+</style>
+</head>
+<body>
+<div class="app">
+    <header>🚨 Alerta Comunitário</header>
+    <div id="chat"><p style="text-align:center; color:#666; margin-top:20px;">Nenhum alerta recebido ainda.</p></div>
+    <div class="area-botao">
+        <button class="btn-voz" id="btn-gravar">🎤</button>
+        <div class="texto-ajuda" id="texto-ajuda">Toque para gravar o alerta</div>
+    </div>
+    <div class="inp">
+        <input type="text" id="txt" placeholder="Relatório de texto (ONGs)...">
+        <button onclick="enviarTexto()" class="env">Enviar</button>
+    </div>
+</div>
+
+<script>
+    const firebaseURL = "https://nv7-cobra-default-rtdb.firebaseio.com/alertas.json";
+    const chat = document.getElementById('chat');
+    const input = document.getElementById('txt');
+    const btnGravar = document.getElementById('btn-gravar');
+    const textoAjuda = document.getElementById('texto-ajuda');
+    let mediaRecorder;
+    let audioChunks = [];
+    let estaGravando = false;
+    let ultimaMensagem = "";
+
+    function formatarHora(timestamp) {
+        const data = new Date(timestamp);
+        return data.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    }
+
+    function criarBolha(texto, classe, hora, audioURL) {
+        if (chat.querySelector('p')) chat.innerHTML = '';
+        const div = document.createElement('div');
+        div.className = 'msg ' + classe;
+        if (audioURL) {
+            div.innerHTML = `🎤 <b>Alerta de voz</b> <br><span class="msg-tempo">${formatarHora(hora)}</span>`;
+            const audio = new Audio(audioURL);
+            audio.play().catch(e => console.log("Erro ao tocar áudio:", e));
+        } else {
+            div.innerHTML = `${texto}<span class="msg-tempo">${formatarHora(hora)}</span>`;
+            if ('speechSynthesis' in window) {
+                window.speechSynthesis.cancel();
+                const fala = new SpeechSynthesisUtterance(texto);
+                fala.lang = navigator.language || 'pt-BR';
+                window.speechSynthesis.speak(fala);
+            }
+        }
+        chat.appendChild(div);
+        chat.scrollTop = chat.scrollHeight;
+    }
+
+    btnGravar.onclick = async function() {
+        if (estaGravando) {
+            mediaRecorder.stop();
+            estaGravando = false;
+            btnGravar.classList.remove('gravando');
+            textoAjuda.innerText = "A processar áudio...";
+            return;
+        }
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            mediaRecorder = new MediaRecorder(stream);
+            mediaRecorder.ondataavailable = event => { audioChunks.push(event.data); };
+            mediaRecorder.onstop = async () => {
+                const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                audioChunks = []; 
+                const reader = new FileReader();
+                reader.readAsDataURL(audioBlob);
+                reader.onloadend = async () => {
+                    const base64Audio = reader.result;
+                    const agora = Date.now();
+                    try {
+                        await fetch(firebaseURL, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ audio: base64Audio, timestamp: agora })
+                        });
+                        textoAjuda.innerText = "Alerta de voz enviado!";
+                        criarBolha('', 'minha-msg', agora, base64Audio);
+                    } catch (e) {
+                        textoAjuda.innerText = "Erro ao enviar. Verifique a internet.";
+                    }
+                };
+            };
+            audioChunks = [];
+            mediaRecorder.start();
+            estaGravando = true;
+            btnGravar.classList.add('gravando');
+            textoAjuda.innerText = "A gravar... Fale agora!";
+        } catch (err) {
+            textoAjuda.innerText = "Permita o acesso ao microfone.";
+        }
+    };
+
+    window.enviarTexto = async function() {
+        if (input.value.trim() !== '') {
+            const agora = Date.now();
+            const texto = input.value;
+            criarBolha(texto, 'minha-msg', agora, null);
+            input.value = '';
+            try {
+                await fetch(firebaseURL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ texto: texto, timestamp: agora })
+                });
+            } catch (e) { console.error("Erro:", e); }
+        }
+    };
+
+    async function ouvirMensagens() {
+        try {
+            const resposta = await fetch(firebaseURL);
+            const dados = await resposta.json();
+            if (dados) {
+                const chaves = Object.keys(dados);
+                const ultimaChave = chaves[chaves.length - 1];
+                const alerta = dados[ultimaChave];
+                const idMensagem = alerta.audio ? alerta.timestamp + "_audio" : alerta.texto + "_texto";
+                if (idMensagem !== ultimaMensagem) {
+                    ultimaMensagem = idMensagem;
+                    if (alerta.audio) {
+                        criarBolha('', 'outra-msg', alerta.timestamp, alerta.audio);
+                    } else if (alerta.texto) {
+                        criarBolha(alerta.texto, 'outra-msg', alerta.timestamp, null);
+                    }
+                }
+            }
+        } catch (e) { console.log("Aguardando..."); }
+    }
+    setInterval(ouvirMensagens, 3000);
+</script>
+</body>
+</html>
