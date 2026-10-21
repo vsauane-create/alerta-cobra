@@ -1,120 +1,344 @@
-<script>
-    const firebaseURL = "https://nv7-cobra-default-rtdb.firebaseio.com/alertas.json";
-    const chat = document.getElementById('chat');
-    const input = document.getElementById('txt');
-    const btnGravar = document.getElementById('btn-gravar');
-    const textoAjuda = document.getElementById('texto-ajuda');
-    let mediaRecorder;
-    let audioChunks = [];
-    let estaGravando = false;
-    let ultimaMensagem = "";
-
-    function formatarHora(timestamp) {
-        const data = new Date(timestamp);
-        return data.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
+  <title>Alerta Comunitário</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+      margin: 0;
+      padding: 0;
     }
 
-    function criarBolha(texto, classe, hora, audioURL) {
-        if (chat.querySelector('p')) chat.innerHTML = '';
-        const div = document.createElement('div');
-        div.className = 'msg ' + classe;
-        if (audioURL) {
-            div.innerHTML = `🎤 <b>Alerta de voz</b> <br><span class="msg-tempo">${formatarHora(hora)}</span>`;
-            const audio = new Audio(audioURL);
-            audio.play().catch(e => console.log("Erro ao tocar áudio:", e));
-        } else {
-            div.innerHTML = `${texto}<span class="msg-tempo">${formatarHora(hora)}</span>`;
-            if ('speechSynthesis' in window) {
-                window.speechSynthesis.cancel();
-                const fala = new SpeechSynthesisUtterance(texto);
-                fala.lang = navigator.language || 'pt-BR';
-                window.speechSynthesis.speak(fala);
-            }
-        }
-        chat.appendChild(div);
-        chat.scrollTop = chat.scrollHeight;
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #111;
+      color: white;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
     }
 
-    btnGravar.onclick = async function() {
-        if (estaGravando) {
-            mediaRecorder.stop();
-            estaGravando = false;
-            btnGravar.classList.remove('gravando');
-            textoAjuda.innerText = "A processar áudio...";
-            return;
-        }
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            mediaRecorder = new MediaRecorder(stream);
-            mediaRecorder.ondataavailable = event => { audioChunks.push(event.data); };
-            mediaRecorder.onstop = async () => {
-                const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
-                audioChunks = []; 
-                const reader = new FileReader();
-                reader.readAsDataURL(audioBlob);
-                reader.onloadend = async () => {
-                    const base64Audio = reader.result;
-                    const agora = Date.now();
-                    try {
-                        await fetch(firebaseURL, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ audio: base64Audio, timestamp: agora })
-                        });
-                        textoAjuda.innerText = "Alerta de voz enviado!";
-                        criarBolha('', 'minha-msg', agora, base64Audio);
-                    } catch (e) {
-                        textoAjuda.innerText = "Erro ao enviar. Verifique a internet.";
-                    }
-                };
-            };
-            audioChunks = [];
-            mediaRecorder.start();
-            estaGravando = true;
-            btnGravar.classList.add('gravando');
-            textoAjuda.innerText = "A gravar... Fale agora!";
-        } catch (err) {
-            textoAjuda.innerText = "Permita o acesso ao microfone.";
-        }
-    };
-
-    window.enviarTexto = async function() {
-        if (input.value.trim() !== '') {
-            const agora = Date.now();
-            const texto = input.value;
-            criarBolha(texto, 'minha-msg', agora, null);
-            input.value = '';
-            try {
-                await fetch(firebaseURL, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ texto: texto, timestamp: agora })
-                });
-            } catch (e) { console.error("Erro:", e); }
-        }
-    };
-
-    async function ouvirMensagens() {
-        try {
-            const resposta = await fetch(firebaseURL);
-            const dados = await resposta.json();
-            if (dados) {
-                const chaves = Object.keys(dados);
-                const ultimaChave = chaves[chaves.length - 1];
-                const alerta = dados[ultimaChave];
-                const idMensagem = alerta.audio ? alerta.timestamp + "_audio" : alerta.texto + "_texto";
-                if (idMensagem !== ultimaMensagem) {
-                    ultimaMensagem = idMensagem;
-                    if (alerta.audio) {
-                        criarBolha('', 'outra-msg', alerta.timestamp, alerta.audio);
-                    } else if (alerta.texto) {
-                        criarBolha(alerta.texto, 'outra-msg', alerta.timestamp, null);
-                    }
-                }
-            }
-        } catch (e) { console.log("Aguardando..."); }
+    .header {
+      background: #1a1a1a;
+      padding: 14px 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid #333;
     }
-    setInterval(ouvirMensagens, 3000);
-</script>
+
+    .header h1 {
+      font-size: 18px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .header button {
+      background: #333;
+      border: none;
+      color: white;
+      padding: 8px 14px;
+      border-radius: 8px;
+      font-size: 14px;
+    }
+
+    .botoes {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      padding: 20px 16px;
+    }
+
+    .btn {
+      flex: 1;
+      border: none;
+      border-radius: 24px;
+      font-size: 28px;
+      font-weight: 700;
+      color: white;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      cursor: pointer;
+      transition: transform 0.1s, filter 0.1s;
+    }
+
+    .btn:active {
+      transform: scale(0.97);
+      filter: brightness(1.2);
+    }
+
+    .btn span {
+      font-size: 16px;
+      font-weight: 500;
+      opacity: 0.95;
+    }
+
+    .mensagens { background: #1565c0; }
+    .voz       { background: #2e7d32; }
+    .sos       { background: #c62828; }
+
+    .relatorio {
+      display: none;
+      flex-direction: column;
+      height: 100%;
+      padding: 16px;
+      gap: 14px;
+    }
+
+    .relatorio.ativo {
+      display: flex;
+    }
+
+    .relatorio label {
+      font-size: 14px;
+      color: #aaa;
+    }
+
+    .relatorio select,
+    .relatorio textarea {
+      width: 100%;
+      background: #222;
+      border: 1px solid #444;
+      border-radius: 14px;
+      color: white;
+      padding: 14px;
+      font-size: 16px;
+    }
+
+    .relatorio textarea {
+      flex: 1;
+      min-height: 180px;
+      resize: none;
+    }
+
+    .btn-enviar {
+      background: #4caf50;
+      border: none;
+      color: white;
+      padding: 16px;
+      border-radius: 14px;
+      font-size: 18px;
+      font-weight: 600;
+    }
+
+    .btn-voltar {
+      background: #333;
+      border: none;
+      color: white;
+      padding: 12px;
+      border-radius: 12px;
+      font-size: 15px;
+      margin-bottom: 8px;
+    }
+
+    .historico {
+      display: none;
+      flex-direction: column;
+      padding: 16px;
+      gap: 10px;
+      overflow-y: auto;
+    }
+
+    .historico.ativo {
+      display: flex;
+    }
+
+    .item {
+      background: #1e1e1e;
+      padding: 14px;
+      border-radius: 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .item .tipo {
+      font-weight: 600;
+    }
+
+    .item .hora {
+      color: #888;
+      font-size: 13px;
+      text-align: right;
+    }
+
+    #confirmacao {
+      position: fixed;
+      inset: 0;
+      background: #2e7d32;
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+    }
+
+    #confirmacao.ativo {
+      display: flex;
+    }
+
+    #confirmacao .icone {
+      font-size: 90px;
+    }
+
+    #confirmacao .texto {
+      font-size: 24px;
+      margin-top: 16px;
+      text-align: center;
+      padding: 0 20px;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <h1>🚨 Alerta Comunitário</h1>
+    <button onclick="mostrarHistorico()">Histórico</button>
+  </div>
+
+  <div class="botoes" id="tela-botoes">
+    <button class="btn mensagens" onclick="abrirRelatorio()">
+      💬
+      <span>Mensagens</span>
+    </button>
+
+    <button class="btn voz" onclick="enviarAlerta('CHAMADA DE VOZ', '📞')">
+      📞
+      <span>Chamada de Voz</span>
+    </button>
+
+    <button class="btn sos" onclick="enviarAlerta('SOS', '🆘')">
+      🆘
+      <span>SOS</span>
+    </button>
+  </div>
+
+  <div class="relatorio" id="tela-relatorio">
+    <button class="btn-voltar" onclick="voltar()">← Voltar</button>
+
+    <div>
+      <label>Destino do relatório</label>
+      <select id="destino">
+        <option value="ONG">ONG</option>
+        <option value="Saúde">Saúde</option>
+        <option value="Agricultura">Agricultura</option>
+        <option value="Pescas">Pescas</option>
+      </select>
+    </div>
+
+    <div style="flex:1; display:flex; flex-direction:column;">
+      <label>Escreva o relatório</label>
+      <textarea id="texto-relatorio" placeholder="Descreva a situação com o máximo de detalhes possível..."></textarea>
+    </div>
+
+    <button class="btn-enviar" onclick="enviarRelatorio()">Enviar Relatório</button>
+  </div>
+
+  <div class="historico" id="tela-historico"></div>
+
+  <div id="confirmacao">
+    <div class="icone" id="icone-confirmacao">✅</div>
+    <div class="texto" id="texto-confirmacao">Alerta enviado</div>
+  </div>
+
+  <script>
+    function vibrar() {
+      if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+    }
+
+    function salvar(tipo, detalhe = "") {
+      try {
+        const lista = JSON.parse(localStorage.getItem('alertas') || '[]');
+        lista.unshift({ tipo, detalhe, data: new Date().toISOString() });
+        if (lista.length > 40) lista.pop();
+        localStorage.setItem('alertas', JSON.stringify(lista));
+      } catch(e) {}
+    }
+
+    function mostrarConfirmacao(icone, texto) {
+      document.getElementById('icone-confirmacao').textContent = icone;
+      document.getElementById('texto-confirmacao').textContent = texto;
+      document.getElementById('confirmacao').classList.add('ativo');
+      setTimeout(() => {
+        document.getElementById('confirmacao').classList.remove('ativo');
+      }, 2500);
+    }
+
+    function enviarAlerta(tipo, icone) {
+      vibrar();
+      salvar(tipo);
+      mostrarConfirmacao(icone, tipo + " enviado");
+    }
+
+    function abrirRelatorio() {
+      document.getElementById('tela-botoes').style.display = 'none';
+      document.getElementById('tela-historico').classList.remove('ativo');
+      document.getElementById('tela-relatorio').classList.add('ativo');
+    }
+
+    function voltar() {
+      document.getElementById('tela-relatorio').classList.remove('ativo');
+      document.getElementById('tela-historico').classList.remove('ativo');
+      document.getElementById('tela-botoes').style.display = 'flex';
+    }
+
+    function enviarRelatorio() {
+      const destino = document.getElementById('destino').value;
+      const texto = document.getElementById('texto-relatorio').value.trim();
+
+      if (!texto) {
+        alert('Escreva alguma coisa no relatório');
+        return;
+      }
+
+      vibrar();
+      salvar(`RELATÓRIO → ${destino}`, texto);
+      document.getElementById('texto-relatorio').value = '';
+      mostrarConfirmacao('📄', `Relatório enviado para ${destino}`);
+      voltar();
+    }
+
+    function mostrarHistorico() {
+      document.getElementById('tela-botoes').style.display = 'none';
+      document.getElementById('tela-relatorio').classList.remove('ativo');
+      document.getElementById('tela-historico').classList.add('ativo');
+
+      const lista = JSON.parse(localStorage.getItem('alertas') || '[]');
+      const container = document.getElementById('tela-historico');
+
+      if (lista.length === 0) {
+        container.innerHTML = '<p style="color:#888; text-align:center; margin-top:40px;">Nenhum alerta enviado ainda</p>';
+        return;
+      }
+
+      container.innerHTML = `
+        <button class="btn-voltar" onclick="voltar()" style="margin-bottom:12px;">← Voltar</button>
+        ${lista.map(item => {
+          const d = new Date(item.data);
+          const hora = d.toLocaleTimeString('pt-PT', {hour:'2-digit', minute:'2-digit'});
+          const dia = d.toLocaleDateString('pt-PT');
+          return `
+            <div class="item">
+              <div>
+                <div class="tipo">${item.tipo}</div>
+                ${item.detalhe ? `<div style="font-size:13px;color:#aaa;margin-top:4px;">${item.detalhe.substring(0,55)}${item.detalhe.length>55?'...':''}</div>` : ''}
+              </div>
+              <div class="hora">${dia}<br>${hora}</div>
+            </div>
+          `;
+        }).join('')}
+      `;
+    }
+  </script>
 </body>
 </html>
